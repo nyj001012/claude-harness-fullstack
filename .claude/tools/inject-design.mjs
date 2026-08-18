@@ -219,7 +219,8 @@ function main() {
     } else if (MODE === 'check') {
       console.log('[inject-design] ✓ 모든 대상 에이전트의 주입 상태가 최신이다.');
     }
-    if (MODE !== 'check' && design === null) {
+    // clear 모드는 design.md를 읽지 않아 design이 항상 null이다. 주입 모드에서만 경고한다.
+    if (MODE === 'inject' && design === null) {
       console.warn('[inject-design] ⚠ design.md가 비어 있어 [NOT READY] 블록을 주입했다. 구현 페이즈 진입 전 아키텍처를 확정하라.');
     }
   }
