@@ -31,10 +31,23 @@ allowed-tools:
 4. **감사 로그 기록 (Audit Logging)**
    - 각 페이즈가 시작하고 종료될 때마다 `.claude/_workspace/log/orchestrator-log.jsonl` 파일에 Append-only 방식으로 로그를 남긴다.
    - 포맷: `{"timestamp": "ISO8601", "phase": "Phase N", "status": "START|END", "task_batch": ["task1", "task2"]}`
-5. **기술 스택 SSOT 강제 (Stack Binding)**
-   - 이 하네스는 **어떤 기술 스택도 전제하지 않는다.** 스택·경로 소유권·표준 명령어·계약 형식·아키텍처 규약은 오직 `.claude/_workspace/01_architecture/design.md`가 정의하며, 모든 하위 에이전트는 이를 읽고 따른다.
-   - 스폰 프롬프트에는 항상 **"작업 착수 전 `design.md`의 기술 스택·소유권·표준 명령어·규약 섹션을 먼저 읽을 것"**을 명시한다.
-   - 하위 에이전트가 `design.md`에 없는 프레임워크·도구·명령어를 사용하려 하면 즉시 중단시키고 아키텍처를 갱신하거나 사용자에게 질의한다.
+5. **기술 스택 SSOT 강제 (Stack Binding) — 정적 주입 방식**
+   - 이 하네스는 **어떤 기술 스택도 전제하지 않는다.** 스택·경로 소유권·표준 명령어·계약 형식·아키텍처 규약은 오직 `.claude/_workspace/01_architecture/design.md`가 정의한다.
+   - ⛔ **에이전트에게 `design.md`를 도구로 읽으라고 지시하지 마라.** 스폰 프롬프트에 "착수 전 설계서를 읽어라", "`Read`로 design.md를 확인하라" 같은 문구를 넣는 것을 금지한다. 대신 아래 주입 절차를 따른다.
+   - 🔧 **주입 절차 (하네스 단 정적 주입):** 에이전트를 스폰하기 **전에** 오케스트레이터가 직접 `Bash`로 실행한다.
+     ```bash
+     node .claude/tools/inject-design.mjs
+     ```
+     이 스크립트는 `fs.readFileSync`로 `design.md` 전문을 읽어 각 대상 에이전트 정의 파일(`.claude/agents/<name>.md`)의 **프론트매터 직후 = 시스템 프롬프트 최상단**에 `<!-- DESIGN_SPEC:BEGIN --> … <!-- DESIGN_SPEC:END -->` 블록으로 보간한다. 멱등이므로 몇 번을 실행해도 안전하다.
+   - 📌 **주입이 캐싱에 유리한 이유:** 에이전트 정의 본문은 그대로 서브 에이전트의 시스템 프롬프트가 되며, 이는 대화의 **불변 접두사**다. 같은 에이전트 타입을 여러 번 스폰해도 이 영역은 캐시 히트한다. 반면 `Read` 호출은 에이전트마다 왕복을 1회씩 추가로 소모하고, 설계 전문이 접두사가 아닌 대화 중간에 실려 재사용되지 않는다.
+   - 🕐 **재주입 시점 (필수):**
+     - Phase 0 진입 직후 (1회)
+     - `system-architect`가 `design.md`를 생성·수정한 직후 (Phase 1 종료 시점)
+     - 파이프라인 도중 사용자가 설계를 수정한 것을 인지한 직후
+   - ✅ **주입 최신성 검증:** 각 에이전트는 최종 보고 첫 줄에 `DESIGN_FINGERPRINT: <값>`을 반환한다. 오케스트레이터는 `node .claude/tools/inject-design.mjs --check`로 확인한 현재 지문과 대조한다.
+     - **지문 불일치 또는 `none` 반환:** Claude Code가 세션 시작 시점의 에이전트 정의를 잡고 있다는 뜻이다. 파이프라인을 멈추고, 사용자에게 **세션 재시작**(또는 `/agents` 재로드) 후 재개를 요청한다. 스폰 프롬프트에 설계 전문을 붙여넣는 방식으로 우회하지 마라 — 그것이 바로 제거하려던 토큰 낭비다.
+   - 🚫 하위 에이전트가 주입 블록에 없는 프레임워크·도구·명령어를 사용하려 하면 즉시 중단시키고, 아키텍처를 갱신(➔ 재주입)하거나 사용자에게 질의한다.
+   - 🚫 `system-architect`와 `release-manager`는 주입 대상이 아니다. 전자는 `design.md`의 **생산자**이므로 낡은 사본을 주입받으면 안 되고(이 역할만 `design.md`를 직접 읽고 쓴다), 후자는 스택 의존성이 없다.
 
 ---
 
@@ -42,7 +55,12 @@ allowed-tools:
 
 ### Phase 0: 컨텍스트 분석 및 동적 라우팅
 - 사용자 요청과 `.claude/_workspace/`의 기존 산출물을 분석하여 필요한 페이즈만 선택한다.
-- ⭐️ **스택 확보 선행 검사:** `design.md`에 「기술 스택」·「디렉터리 구조 및 소유권」·「표준 명령어」 섹션이 존재하는지 확인한다.
+- ⭐️ **설계 명세 주입 (최우선 실행):** 어떤 에이전트를 스폰하기 전에 반드시 먼저 실행한다.
+  ```bash
+  node .claude/tools/inject-design.mjs
+  ```
+  출력의 `fingerprint` 값을 이번 파이프라인의 기준 지문으로 기억하고, 감사 로그에 함께 남긴다. `design.md`가 없으면 스크립트가 `[NOT READY]` 블록을 주입하여 하위 에이전트가 스택 의존 작업에 착수하지 못하도록 차단한다.
+- ⭐️ **스택 확보 선행 검사:** `design.md`에 「기술 스택」·「디렉터리 구조 및 소유권」·「표준 명령어」 섹션이 존재하는지 확인한다. (이 검사는 오케스트레이터 본인의 `Read`로 수행한다 — 금지 대상은 **하위 에이전트**의 조회다.)
   - **없거나 불완전한 경우:** 어떤 라우트든 구현 페이즈로 진입하기 전에 스택을 먼저 확정한다. 기존 코드베이스가 있으면 `system-architect`를 **스택 확정 목적으로 최소 범위 호출**하여 현행 스택(매니페스트·설정·디렉터리 구조 기반)을 `design.md`에 기록시킨다. 신규 프로젝트면 Phase 1을 정식 수행한다.
   - **추론조차 불가한 경우:** 파이프라인을 멈추고 사용자에게 스택 결정을 질의한다. 스택을 추측해 구현에 들어가지 않는다.
   - **전체 구축 (Full):** Phase 1 ➔ 2 ➔ 3(Track A+B) ➔ 4 ➔ 5
@@ -50,12 +68,13 @@ allowed-tools:
   - **백엔드 단독 (BE-only):** Phase 2(계약 필요 시) ➔ Phase 3(Backend QA/Developer/Reviewer) ➔ 4 ➔ 5
   - **인프라 단독 (Infra-only):** Phase 3 Track B만 실행
   - **문서 단독 (Docs-only):** Phase 5의 `tech-writer`만 실행
-- `orchestrator-log.jsonl`에 `INIT` 로그와 선택·생략한 페이즈 및 근거를 기록한다.
+- `orchestrator-log.jsonl`에 `INIT` 로그와 선택·생략한 페이즈, 근거, 그리고 `design_fingerprint`를 기록한다.
 
 ### Phase 1: 아키텍처 설계
 - 전체 구축이거나 아키텍처 변경이 필요한 경우에만 `system-architect` agent type으로 teammate들을 이름을 지정해 스폰하고, `design.md`를 산출한다.
 - ⭐️ **산출물 검수:** `design.md`에 **기술 스택(선정 근거 포함)·역할별 쓰기 소유권·표준 명령어·계약 산출 형식·아키텍처 규약**이 모두 채워졌는지 오케스트레이터가 직접 확인한다. 하나라도 비면 다음 페이즈로 진행하지 않고 아키텍트에게 보완을 지시한다.
-- ⭐️ **[마이크로 커밋]** 완료 후 `git commit -m "docs(architecture): 시스템 설계 완료"` 실행.
+- ⭐️ **[필수] 재주입:** 검수 통과 즉시 `node .claude/tools/inject-design.mjs`를 다시 실행하여 확정된 설계를 하위 에이전트의 시스템 프롬프트에 반영하고, 새 `fingerprint`를 기준 지문으로 갱신한다. **이 단계를 건너뛰면 Phase 2 이후 전원이 낡거나 비어 있는 명세로 작업하게 된다.**
+- ⭐️ **[마이크로 커밋]** 완료 후 `git commit -m "docs(architecture): 시스템 설계 완료"` 실행. 주입으로 변경된 `.claude/agents/*.md`도 같은 커밋에 포함한다.
 
 ### Phase 2: 티켓팅 및 브랜치 파생 (Sub-agent)
 - 필요한 역할만 `Agent`로 호출한다. 신규 티켓이 필요하면 `issue-pm` agent type, 계약이 필요하면 `tech-leader` agent type을 명시한다.
@@ -66,19 +85,35 @@ allowed-tools:
 
 ### Phase 3: 병렬 개발 트랙 (FE/BE/QA/Infra)
 - Track A (앱 구현): 선택된 라우트에 맞춰 `backend-qa`, `backend-developer`, `frontend-qa`, `frontend-developer`, `code-reviewer` agent type 중 필요한 역할을 정확히 명시해 스폰하고 P2P 핑퐁 개발을 진행한다.
-- ⭐️ 스폰 프롬프트에 `design.md`의 스택·소유권·표준 명령어를 **먼저 읽으라는 지시**를 포함하고, 각 역할이 자기 소유 경로 밖을 건드리지 않도록 경계를 재확인시킨다.
+- ⭐️ 스폰 프롬프트에는 **설계 조회 지시를 넣지 않는다.** 스택·소유권·표준 명령어는 이미 시스템 프롬프트의 `<design_spec>` 블록에 주입되어 있다. 프롬프트에는 **이번 작업의 범위·대상 파일·완료 조건**만 담고, 각 역할이 자기 소유 경로 밖을 건드리지 않도록 경계만 재확인시킨다.
+- ⭐️ 각 에이전트가 반환한 `DESIGN_FINGERPRINT`를 기준 지문과 대조한다. 불일치·누락이면 Orchestration Rule 5의 실패 처리(세션 재시작 요청)를 따른다.
 - Track B (인프라): `devops-engineer` agent type으로 teammate를 스폰해 설정을 진행한다.
 - 완료 후 `git commit -m "feat(app): Phase 3 애플리케이션 및 인프라 구현 완료"` 실행.
 - 필요에 따라 `feat`을 제외한 `fix` 등의 커밋 메시지 형태도 허용된다.
 
 ### Phase 4: E2E 통합 테스트 (신규)
 - `Agent`로 `e2e-tester` agent type을 명시해 호출한다.
-- `design.md`가 확정한 E2E 도구로 작성된 테스트가 100% 통과(Green)되는지 대기한다.
+- 주입된 `<design_spec>`이 확정한 E2E 도구로 작성된 테스트가 100% 통과(Green)되는지 대기한다.
 - 완료 후 `git commit -m "test(e2e): 브라우저 통합 시나리오 검증 완료"` 실행.
 
 ### Phase 5: 릴리즈(MR) 및 문서화
 - 라우팅 결과에 따라 `release-manager`와 `tech-writer` agent type 중 필요한 역할만 명시해 호출한다.
 - 생성된 마이크로 커밋들을 모아 원격 저장소에 Push하고 MR/PR을 생성한 뒤 파이프라인을 종료한다.
+
+---
+
+## 🔧 주입 스크립트 레퍼런스 (`.claude/tools/inject-design.mjs`)
+
+| 명령 | 용도 |
+|---|---|
+| `node .claude/tools/inject-design.mjs` | `design.md` 전문을 대상 에이전트 시스템 프롬프트에 주입/갱신 (멱등) |
+| `node .claude/tools/inject-design.mjs --check` | 주입 최신성 검증만 수행. 드리프트가 있으면 exit 1 (CI 스테이지용) |
+| `node .claude/tools/inject-design.mjs --json` | 결과를 JSON으로 출력 (`fingerprint`, 에이전트별 상태) |
+| `node .claude/tools/inject-design.mjs --dry-run` | 파일을 쓰지 않고 결과만 확인 |
+| `node .claude/tools/inject-design.mjs --clear` | 주입 블록을 제거하고 하네스 원본 상태로 복원 |
+
+- 주입 대상은 스크립트의 `TARGETS` 배열이 정의한다. 에이전트를 추가·삭제하면 이 배열도 함께 갱신한다.
+- 주입 블록은 자동 생성 영역이다. `.claude/agents/*.md`의 `<!-- DESIGN_SPEC:BEGIN -->` ~ `<!-- DESIGN_SPEC:END -->` 구간을 손으로 편집하지 않는다.
 
 ---
 

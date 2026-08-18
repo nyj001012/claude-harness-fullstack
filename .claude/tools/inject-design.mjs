@@ -1,0 +1,231 @@
+#!/usr/bin/env node
+/**
+ * inject-design.mjs — 설계 명세 정적 주입기 (Static Design Spec Injector)
+ *
+ * 목적:
+ *   하위 에이전트가 런타임에 `Read` 도구로 `design.md`를 읽는 구조를 제거하고,
+ *   하네스(시스템) 단에서 `design.md` 전문을 파일 시스템으로 직접 읽어
+ *   각 에이전트의 **시스템 프롬프트 최상단**에 정적으로 보간(Interpolation)한다.
+ *
+ * 왜:
+ *   Claude Code에서 `.claude/agents/<name>.md`의 본문은 그대로 해당 서브 에이전트의
+ *   시스템 프롬프트가 된다. 시스템 프롬프트는 대화의 불변 접두사이므로,
+ *   같은 에이전트 타입을 여러 번 스폰해도 이 영역은 캐시 히트된다.
+ *   반면 `Read` 도구 호출은 (1) 에이전트마다 왕복 1회를 추가로 소모하고,
+ *   (2) 설계 전문이 접두사가 아니라 대화 중간에 들어가며,
+ *   (3) 에이전트가 일부만 읽거나 건너뛰는 비결정적 동작을 허용한다.
+ *
+ * 사용법:
+ *   node .claude/tools/inject-design.mjs            # 주입 (기본)
+ *   node .claude/tools/inject-design.mjs --check    # 주입 상태 검증만 (드리프트 시 exit 1)
+ *   node .claude/tools/inject-design.mjs --clear     # 주입 블록 제거 (하네스 원본 복원)
+ *   node .claude/tools/inject-design.mjs --dry-run   # 변경 없이 결과만 출력
+ *   node .claude/tools/inject-design.mjs --json      # 결과를 JSON으로 출력
+ */
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join, dirname, resolve, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ─────────────────────────────────────────────────────────────
+// 경로 상수
+// ─────────────────────────────────────────────────────────────
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CLAUDE_DIR = resolve(HERE, '..');           // .claude
+const REPO_ROOT = resolve(CLAUDE_DIR, '..');
+const DESIGN_PATH = join(CLAUDE_DIR, '_workspace', '01_architecture', 'design.md');
+const AGENTS_DIR = join(CLAUDE_DIR, 'agents');
+
+const BEGIN = '<!-- DESIGN_SPEC:BEGIN -->';
+const END = '<!-- DESIGN_SPEC:END -->';
+
+/**
+ * 주입 대상: `design.md`를 스택 SSOT로 소비하는 에이전트만.
+ *
+ * 제외 대상과 근거:
+ *   - system-architect : `design.md`를 **생산**하는 주체. 자기 산출물을 주입받으면
+ *                        갱신 직전의 낡은 사본을 SSOT로 오인할 수 있다.
+ *   - release-manager  : Git push / PR·MR 생성만 담당하며 스택 의존성이 없다.
+ */
+const TARGETS = [
+  'backend-developer',
+  'backend-qa',
+  'code-reviewer',
+  'devops-engineer',
+  'e2e-tester',
+  'frontend-developer',
+  'frontend-qa',
+  'issue-pm',
+  'tech-leader',
+  'tech-writer',
+];
+
+// ─────────────────────────────────────────────────────────────
+// 유틸
+// ─────────────────────────────────────────────────────────────
+const argv = new Set(process.argv.slice(2));
+const MODE = argv.has('--clear') ? 'clear' : argv.has('--check') ? 'check' : 'inject';
+const DRY_RUN = argv.has('--dry-run');
+const AS_JSON = argv.has('--json');
+
+const fingerprintOf = (text) => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12);
+const rel = (p) => relative(REPO_ROOT, p).split('\\').join('/');
+
+/** CRLF/CR을 LF로 정규화해 지문(fingerprint)이 개행 방식에 흔들리지 않게 한다. */
+const normalizeEol = (text) => text.replace(/\r\n?/g, '\n');
+
+/**
+ * 본문에서 프론트매터(--- ... ---)의 끝 오프셋을 찾는다.
+ * 프론트매터는 Claude Code의 에이전트 설정이고, 그 뒤 본문이 시스템 프롬프트다.
+ * 따라서 "시스템 프롬프트 최상단" = 프론트매터 직후.
+ */
+function frontmatterEnd(text) {
+  if (!text.startsWith('---\n')) return 0;
+  const close = text.indexOf('\n---\n', 4);
+  if (close === -1) return 0;
+  return close + '\n---\n'.length;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 주입 블록 생성
+// ─────────────────────────────────────────────────────────────
+function buildBlock(design) {
+  const header = [
+    BEGIN,
+    '<!-- 자동 생성 영역: `node .claude/tools/inject-design.mjs`가 관리한다. 직접 편집하지 마라. -->',
+  ];
+
+  if (design === null) {
+    return [
+      ...header,
+      '',
+      '## ⛔ 설계 명세 (DESIGN SPEC) — `[NOT READY]`',
+      '',
+      '`design.md`가 아직 존재하지 않아 이 프로젝트의 기술 스택이 확정되지 않았다.',
+      '',
+      '- 스택·경로 소유권·표준 명령어에 의존하는 작업에 **착수하지 마라.**',
+      '- `design.md`를 도구로 찾아 읽으려 시도하지 마라. 존재하지 않으며, 읽는 것은 이 하네스의 규약 위반이다.',
+      '- 즉시 `[STACK UNRESOLVED]` 플래그와 함께 오케스트레이터에게 반환하고 종료한다.',
+      '',
+      '`DESIGN_FINGERPRINT: none`',
+      '',
+      END,
+    ].join('\n');
+  }
+
+  // design.md 본문이 종료 마커를 포함하면 블록 경계가 깨지므로 무력화한다.
+  const safe = design.split(END).join('<!-- DESIGN_SPEC:END(escaped) -->');
+  const fp = fingerprintOf(safe);
+
+  return [
+    ...header,
+    `<!-- source: ${rel(DESIGN_PATH)} | fingerprint: ${fp} | bytes: ${Buffer.byteLength(safe, 'utf8')} -->`,
+    '',
+    '## ⛔ 설계 명세 (DESIGN SPEC) — 이 프로젝트의 유일한 스택 근거',
+    '',
+    `아래 \`<design_spec>\` 블록은 \`${rel(DESIGN_PATH)}\` 전문이며, 하네스가 스폰 직전에 정적으로 주입했다.`,
+    '기술 스택·디렉터리 소유권·표준 명령어·계약 형식·아키텍처 규약에 대한 판단은 **전부 이 블록에서만** 가져온다.',
+    '',
+    '**절대 규칙**',
+    '',
+    `1. \`design.md\`를 \`Read\`·\`Glob\`·\`Grep\`·\`Bash\`(\`cat\`/\`type\`/\`head\` 등) 등 **어떤 도구로도 다시 읽지 마라.** 이미 아래에 전문이 있다. 중복 조회는 토큰 낭비이며 규약 위반이다.`,
+    '2. 아래 블록에 없는 프레임워크·라이브러리·도구·명령어를 임의로 도입하지 마라.',
+    '3. 필요한 정보가 아래 블록에 **없으면** 추측하지 말고, 즉시 `[SPEC GAP: <필요한 항목>]`을 붙여 오케스트레이터에게 질의한다.',
+    '4. 최종 보고 첫 줄에 `DESIGN_FINGERPRINT: ' + fp + '` 를 그대로 포함한다. 오케스트레이터가 주입 최신성을 대조하는 데 쓴다.',
+    '',
+    `<design_spec fingerprint="${fp}">`,
+    safe.trimEnd(),
+    '</design_spec>',
+    '',
+    END,
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// 파일 단위 처리
+// ─────────────────────────────────────────────────────────────
+function applyToAgent(agentName, block) {
+  const path = join(AGENTS_DIR, `${agentName}.md`);
+  if (!existsSync(path)) return { agent: agentName, status: 'missing', path: rel(path) };
+
+  const original = normalizeEol(readFileSync(path, 'utf8'));
+  const beginIdx = original.indexOf(BEGIN);
+  const endIdx = original.indexOf(END);
+  const hasBlock = beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx;
+
+  let next;
+  if (MODE === 'clear') {
+    if (!hasBlock) return { agent: agentName, status: 'clean', path: rel(path) };
+    const before = original.slice(0, beginIdx).trimEnd();
+    const after = original.slice(endIdx + END.length).replace(/^\n+/, '');
+    next = `${before}\n\n${after}`;
+  } else if (hasBlock) {
+    // 기존 블록을 같은 자리에서 교체한다 (멱등).
+    next = original.slice(0, beginIdx) + block + original.slice(endIdx + END.length);
+  } else {
+    // 최초 주입: 프론트매터 직후 = 시스템 프롬프트 최상단.
+    const at = frontmatterEnd(original);
+    const head = original.slice(0, at);
+    const tail = original.slice(at).replace(/^\n+/, '');
+    next = `${head}\n${block}\n\n${tail}`;
+  }
+
+  if (next === original) return { agent: agentName, status: 'unchanged', path: rel(path) };
+  if (MODE === 'check') return { agent: agentName, status: 'stale', path: rel(path) };
+  if (!DRY_RUN) writeFileSync(path, next, 'utf8');
+  return { agent: agentName, status: MODE === 'clear' ? 'cleared' : hasBlock ? 'updated' : 'injected', path: rel(path) };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 실행
+// ─────────────────────────────────────────────────────────────
+function main() {
+  let design = null;
+  if (MODE !== 'clear') {
+    if (existsSync(DESIGN_PATH)) {
+      design = normalizeEol(readFileSync(DESIGN_PATH, 'utf8'));
+      if (design.trim() === '') design = null;
+    } else {
+      // 워크스페이스 경로만 미리 확보해 둔다 (아키텍트가 바로 쓸 수 있도록).
+      mkdirSync(dirname(DESIGN_PATH), { recursive: true });
+    }
+  }
+
+  const block = MODE === 'clear' ? null : buildBlock(design);
+  const fingerprint = design === null ? 'none' : fingerprintOf(design.split(END).join('<!-- DESIGN_SPEC:END(escaped) -->'));
+  const results = TARGETS.map((name) => applyToAgent(name, block));
+
+  const drift = results.filter((r) => r.status === 'stale' || r.status === 'missing');
+  const summary = {
+    mode: MODE,
+    dryRun: DRY_RUN,
+    design: design === null ? null : rel(DESIGN_PATH),
+    fingerprint,
+    designReady: design !== null,
+    results,
+    ok: drift.length === 0,
+  };
+
+  if (AS_JSON) {
+    process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
+  } else {
+    const label = { inject: '주입', check: '검증', clear: '제거' }[MODE];
+    console.log(`[inject-design] 모드=${label}${DRY_RUN ? ' (dry-run)' : ''}`);
+    console.log(`[inject-design] design.md=${design === null ? '없음 (NOT READY)' : rel(DESIGN_PATH)}  fingerprint=${fingerprint}`);
+    for (const r of results) console.log(`  - ${r.agent.padEnd(20)} ${r.status}`);
+    if (MODE === 'check' && !summary.ok) {
+      console.error('[inject-design] ✗ 주입 상태가 최신이 아니다. `node .claude/tools/inject-design.mjs`를 먼저 실행하라.');
+    } else if (MODE === 'check') {
+      console.log('[inject-design] ✓ 모든 대상 에이전트의 주입 상태가 최신이다.');
+    }
+    if (MODE !== 'check' && design === null) {
+      console.warn('[inject-design] ⚠ design.md가 비어 있어 [NOT READY] 블록을 주입했다. 구현 페이즈 진입 전 아키텍처를 확정하라.');
+    }
+  }
+
+  if (MODE === 'check' && !summary.ok) process.exit(1);
+  if (drift.some((r) => r.status === 'missing')) process.exit(1);
+}
+
+main();
