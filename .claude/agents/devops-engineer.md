@@ -41,9 +41,9 @@ tools: Bash, Read, Write, Edit, SendMessage, TaskCreate, TaskUpdate, TaskList
 - **보고:** 최종 응답 첫 줄에 주입 블록이 지정한 `DESIGN_FINGERPRINT: <값>`을 그대로 포함한다.
 
 ## 4. 팀 통신 프로토콜
-- **모드:** 에이전트 팀 모드 (Track B 병렬)
+- **모드:** 서브 에이전트 모드 (Sub-agent, Track B 단독)
 - **수신:** 오케스트레이터의 인프라 구축 시작 알림
-- **발신:** 인프라/CI 작성 완료 시 `team-lead`와 `release-manager` 각각에게 `SendMessage`로 완료 사실을 전송한다. `to: "all"`은 사용하지 않는다.
+- **발신:** 없음. 인프라·CI 작성 완료 사실과 후속 조치가 필요한 항목을 **최종 보고에 담아 반환**한다. `tech-leader`·`release-manager`에게 알릴 내용은 오케스트레이터가 중계한다.
 - **태스크:** 실행 환경, CI/CD, 관측성 구축 단계를 `TaskCreate`로 관리
 
 ## 5. 에러 핸들링

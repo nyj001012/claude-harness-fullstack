@@ -18,6 +18,8 @@ allowed-tools:
 ## 📌 Orchestration Rules (절대 준수 규칙)
 
 1. **팀원 간 직접 통신 (P2P Communication)**
+   - ⭐️ **스폰 모드 정책:** 팀 모드는 **Phase 3 Track A에만** 쓴다 (QA ↔ Developer ↔ Reviewer 핑퐁). 그 밖의 모든 역할은 **서브 에이전트**로 스폰하고 결과를 최종 보고로만 받는다. 아래 P2P 규칙은 Track A teammate에게만 적용된다.
+   - ⭐️ **서브 에이전트에게는 발신 대상이 없다.** 임무를 마치면 스스로 종료되므로 `SendMessage`로 다른 역할을 부를 수 없다. 다른 역할에 전달할 내용은 최종 보고에 담게 하고, **오케스트레이터가 중계**해 필요한 역할을 다시 스폰한다.
    - `Agent`로 teammate를 이름과 역할을 지정해 스폰한다. 첫 teammate가 스폰되면 현재 세션의 agent team이 자동 구성된다.
    - 단일 인스턴스 역할의 teammate 이름은 반드시 agent type과 동일하게 지정한다(예: `frontend-developer`). 같은 역할을 복제할 때는 `frontend-developer-1`처럼 고유 이름을 부여하고, spawn prompt에 함께 통신할 모든 실제 recipient 이름을 명시한다.
    - teammate들은 리더(오케스트레이터)를 거치지 않고, 반드시 `SendMessage(to: "정확한 에이전트명")`를 사용하여 서로 직접 소통하고 피드백 루프를 돌아야 한다.
@@ -25,7 +27,7 @@ allowed-tools:
 2. **명시적 작업 할당 (Task Board)**
    - 각 페이즈가 시작될 때 오케스트레이터는 구두로 지시하지 말고, 반드시 `TaskCreate`를 호출하여 에이전트들이 수행할 작업(Task)들을 명확한 티켓 형태로 보드에 등록해야 한다.
 3. **마이크로 커밋 및 안전 종료 시퀀스 (Micro-commits & Graceful Shutdown)**
-   - 각 Phase나 개발 트랙 종료 시 활성 teammate 각각에게 이름으로 `shutdown_request`를 전송하고, 파일 I/O 완료와 종료 승인을 모두 확인한다.
+   - 각 Phase나 개발 트랙 종료 시 활성 teammate 각각에게 이름으로 `shutdown_request`를 전송하고, 파일 I/O 완료와 종료 승인을 모두 확인한다. **이 시퀀스는 팀 모드 teammate(Phase 3 Track A)에게만 적용된다** — 서브 에이전트는 임무를 마치면 스스로 종료되므로 대상이 아니다.
    - **그 다음, Rule 6의 페이즈 인계 파일(`.claude/_workspace/handoff/phase-<N>.md`)을 기록한다.** 다음 페이즈가 필요한 사실을 파일에 먼저 남긴 뒤 커밋해야, 컨텍스트가 요약되거나 세션이 끊겨도 인계가 끊기지 않는다.
    - **그 뒤에, 오케스트레이터가 직접 `Bash` 도구를 사용하여 해당 Phase의 변경만 스테이징하고 `git commit -m "feat(Phase N): [작업명] 완료"` 형식으로 스냅샷을 저장한다.**
    - 별도 팀 삭제 도구는 사용하지 않는다. 공유 팀 리소스는 세션 종료 시 자동 정리된다.
@@ -104,7 +106,7 @@ allowed-tools:
 - `orchestrator-log.jsonl`에 `INIT` 로그와 선택·생략한 페이즈, 근거, 그리고 `design_fingerprint`를 기록한다.
 
 ### Phase 1: 아키텍처 설계
-- 전체 구축이거나 아키텍처 변경이 필요한 경우에만 `system-architect` agent type으로 teammate들을 이름을 지정해 스폰하고, `design.md`를 산출한다.
+- 전체 구축이거나 아키텍처 변경이 필요한 경우에만 `system-architect` agent type을 **서브 에이전트로 스폰**해 `design.md`를 산출한다. 단독 산출물 생산자이며 P2P 상대가 없으므로 팀 모드로 두지 않는다 (Rule 1). 따라서 이 페이즈에는 shutdown 시퀀스가 없다.
 - ⭐️ **산출물 검수 (스크립트 위임):** `node .claude/tools/inject-design.mjs --sections`를 실행해 **기술 스택·디렉터리 구조 및 소유권·표준 명령어·계약 산출 형식·아키텍처 규약** 5개 섹션이 모두 채워졌는지 확인한다. exit 1이면 다음 페이즈로 진행하지 않고, 스크립트가 지목한 미충족 섹션만 아키텍트에게 보완 지시한다. 여기서도 `design.md` 전문을 열지 않는다.
 - ⭐️ **[필수] 재주입:** 검수 통과 즉시 `node .claude/tools/inject-design.mjs`를 다시 실행하여 확정된 설계를 하위 에이전트의 시스템 프롬프트에 반영하고, 새 `fingerprint`를 기준 지문으로 갱신한다. **이 단계를 건너뛰면 Phase 2 이후 전원이 낡거나 비어 있는 명세로 작업하게 된다.**
 - ⭐️ **[마이크로 커밋]** 완료 후 `git commit -m "docs(architecture): 시스템 설계 완료"` 실행. 주입으로 변경된 `.claude/agents/*.md`도 같은 커밋에 포함한다. 커밋 직전에 Rule 6의 인계 파일 `handoff/phase-1.md`를 기록한다.
@@ -120,7 +122,7 @@ allowed-tools:
 - Track A (앱 구현): 선택된 라우트에 맞춰 `backend-qa`, `backend-developer`, `frontend-qa`, `frontend-developer`, `code-reviewer` agent type 중 필요한 역할을 정확히 명시해 스폰하고 P2P 핑퐁 개발을 진행한다.
 - ⭐️ 스폰 프롬프트에는 **설계 조회 지시를 넣지 않는다.** 스택·소유권·표준 명령어는 이미 시스템 프롬프트의 `<design_spec>` 블록에 주입되어 있다. 프롬프트에는 **이번 작업의 범위·대상 파일·완료 조건**만 담고, 각 역할이 자기 소유 경로 밖을 건드리지 않도록 경계만 재확인시킨다.
 - ⭐️ 각 에이전트가 반환한 `DESIGN_FINGERPRINT`를 기준 지문과 대조한다. 불일치·누락이면 Orchestration Rule 5의 실패 처리(세션 재시작 요청)를 따른다.
-- Track B (인프라): `devops-engineer` agent type으로 teammate를 스폰해 설정을 진행한다.
+- Track B (인프라): `devops-engineer` agent type을 **서브 에이전트로 스폰**해 설정을 진행한다. Track A와 P2P 통신하지 않으므로 팀 모드가 필요 없다 (Rule 1). 완료 사실은 최종 보고로 받아 오케스트레이터가 중계한다.
 - 완료 후 `git commit -m "feat(app): Phase 3 애플리케이션 및 인프라 구현 완료"` 실행. 커밋 직전에 `handoff/phase-3.md`를 기록한다 (Rule 6). code-reviewer의 미해결 반려는 `open_items`에 남긴다.
 - 필요에 따라 `feat`을 제외한 `fix` 등의 커밋 메시지 형태도 허용된다.
 
