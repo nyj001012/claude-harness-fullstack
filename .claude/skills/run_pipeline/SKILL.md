@@ -60,7 +60,12 @@ allowed-tools:
   node .claude/tools/inject-design.mjs
   ```
   출력의 `fingerprint` 값을 이번 파이프라인의 기준 지문으로 기억하고, 감사 로그에 함께 남긴다. `design.md`가 없으면 스크립트가 `[NOT READY]` 블록을 주입하여 하위 에이전트가 스택 의존 작업에 착수하지 못하도록 차단한다.
-- ⭐️ **스택 확보 선행 검사:** `design.md`에 「기술 스택」·「디렉터리 구조 및 소유권」·「표준 명령어」 섹션이 존재하는지 확인한다. (이 검사는 오케스트레이터 본인의 `Read`로 수행한다 — 금지 대상은 **하위 에이전트**의 조회다.)
+- ⭐️ **스택 확보 선행 검사 (스크립트 위임):** 필수 섹션의 충족 여부를 오케스트레이터가 직접 읽어 판단하지 않고 아래 명령에 위임한다.
+  ```bash
+  node .claude/tools/inject-design.mjs --sections
+  ```
+  「기술 스택」·「디렉터리 구조 및 소유권」·「표준 명령어」·「계약 산출 형식」·「아키텍처 규약」 5개 섹션의 존재와 본문 유무를 검사해 미충족이 있으면 exit 1과 미충족 목록을 낸다. 표기 흔들림(헤딩 레벨, `「」`, 번호, 동의 표현)은 스크립트가 흡수한다.
+  - ⛔ **오케스트레이터도 `design.md`를 전문 조회하지 않는다.** 판정에 필요한 것은 종료 코드와 섹션 요약뿐이며, 설계 본문은 이미 `inject-design.mjs`가 하위 에이전트의 시스템 프롬프트에 주입하고 있다. 전문을 읽으면 오케스트레이터 컨텍스트를 가장 크게 차지하는 항목이 되므로 `Read`·`cat`으로 열지 마라. (유일한 예외는 `design.md`의 **생산자**인 `system-architect`다. 이 역할만 직접 읽고 쓴다.)
   - **없거나 불완전한 경우:** 어떤 라우트든 구현 페이즈로 진입하기 전에 스택을 먼저 확정한다. 기존 코드베이스가 있으면 `system-architect`를 **스택 확정 목적으로 최소 범위 호출**하여 현행 스택(매니페스트·설정·디렉터리 구조 기반)을 `design.md`에 기록시킨다. 신규 프로젝트면 Phase 1을 정식 수행한다.
   - **추론조차 불가한 경우:** 파이프라인을 멈추고 사용자에게 스택 결정을 질의한다. 스택을 추측해 구현에 들어가지 않는다.
   - **전체 구축 (Full):** Phase 1 ➔ 2 ➔ 3(Track A+B) ➔ 4 ➔ 5
@@ -72,7 +77,7 @@ allowed-tools:
 
 ### Phase 1: 아키텍처 설계
 - 전체 구축이거나 아키텍처 변경이 필요한 경우에만 `system-architect` agent type으로 teammate들을 이름을 지정해 스폰하고, `design.md`를 산출한다.
-- ⭐️ **산출물 검수:** `design.md`에 **기술 스택(선정 근거 포함)·역할별 쓰기 소유권·표준 명령어·계약 산출 형식·아키텍처 규약**이 모두 채워졌는지 오케스트레이터가 직접 확인한다. 하나라도 비면 다음 페이즈로 진행하지 않고 아키텍트에게 보완을 지시한다.
+- ⭐️ **산출물 검수 (스크립트 위임):** `node .claude/tools/inject-design.mjs --sections`를 실행해 **기술 스택·디렉터리 구조 및 소유권·표준 명령어·계약 산출 형식·아키텍처 규약** 5개 섹션이 모두 채워졌는지 확인한다. exit 1이면 다음 페이즈로 진행하지 않고, 스크립트가 지목한 미충족 섹션만 아키텍트에게 보완 지시한다. 여기서도 `design.md` 전문을 열지 않는다.
 - ⭐️ **[필수] 재주입:** 검수 통과 즉시 `node .claude/tools/inject-design.mjs`를 다시 실행하여 확정된 설계를 하위 에이전트의 시스템 프롬프트에 반영하고, 새 `fingerprint`를 기준 지문으로 갱신한다. **이 단계를 건너뛰면 Phase 2 이후 전원이 낡거나 비어 있는 명세로 작업하게 된다.**
 - ⭐️ **[마이크로 커밋]** 완료 후 `git commit -m "docs(architecture): 시스템 설계 완료"` 실행. 주입으로 변경된 `.claude/agents/*.md`도 같은 커밋에 포함한다.
 
@@ -109,6 +114,7 @@ allowed-tools:
 | `node .claude/tools/inject-design.mjs` | `design.md` 전문을 대상 에이전트 시스템 프롬프트에 주입/갱신 (멱등) |
 | `node .claude/tools/inject-design.mjs --check` | 주입 최신성 검증만 수행. 드리프트가 있으면 exit 1 (CI 스테이지용) |
 | `node .claude/tools/inject-design.mjs --json` | 결과를 JSON으로 출력 (`fingerprint`, 에이전트별 상태) |
+| `node .claude/tools/inject-design.mjs --sections` | `design.md`의 필수 5개 섹션 완결성만 검사. 미충족 시 exit 1 (파일을 쓰지 않는 읽기 전용) |
 | `node .claude/tools/inject-design.mjs --dry-run` | 파일을 쓰지 않고 결과만 확인 |
 | `node .claude/tools/inject-design.mjs --clear` | 주입 블록을 제거하고 하네스 원본 상태로 복원 |
 
