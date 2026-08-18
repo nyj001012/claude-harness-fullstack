@@ -1,0 +1,17 @@
+# 하네스 런타임 산출물 — 세션마다 새로 생기고 재현 가능하므로 추적하지 않는다.
+
+# 오케스트레이터 감사 로그 (append-only, 세션별)
+.claude/_workspace/log/
+
+# 페이즈 인계 파일 (Orchestration Rule 6) — 다음 페이즈로만 넘기는 휘발성 상태
+.claude/_workspace/handoff/
+
+# issue-pm 실행 리포트 및 CLI 실패 폴백 — 실제 이슈는 GitHub/GitLab이 SSOT
+.claude/_workspace/02_issues/
+
+# 아래 두 경로는 의도적으로 추적한다. 지우거나 무시 대상에 넣지 마라.
+#   01_architecture/ — design.md는 이 프로젝트의 기술 스택 SSOT
+#   03_contracts/    — 팀 간 인터페이스 합의물
+# 스택별 무시 규칙(빌드 산출물, 의존성 디렉터리 등)은 이 파일에 넣지 않는다.
+# 이 하네스는 기술 스택 무관이며, 그것은 design.md가 스택을 확정한 뒤
+# devops-engineer가 다룰 몫이다.

@@ -319,9 +319,9 @@ function main() {
       design = normalizeEol(readFileSync(DESIGN_PATH, 'utf8'));
       if (design.trim() === '') design = null;
     } else {
-      // 워크스페이스 경로만 미리 확보해 둔다 (아키텍트가 바로 쓸 수 있도록).
-      // --sections는 완전 읽기 전용이므로 워크스페이스 경로도 만들지 않는다.
-      if (MODE !== 'sections') mkdirSync(dirname(DESIGN_PATH), { recursive: true });
+      // 워크스페이스 경로는 **실제 주입에서만** 미리 확보한다 (아키텍트가 바로 쓸 수 있도록).
+      // --check / --sections / --dry-run은 문서상 검증·미리보기 전용이므로 파일 시스템을 바꾸지 않는다.
+      if (MODE === 'inject' && !DRY_RUN) mkdirSync(dirname(DESIGN_PATH), { recursive: true });
     }
   }
 
