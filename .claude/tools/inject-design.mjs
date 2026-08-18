@@ -21,6 +21,7 @@
  *   node .claude/tools/inject-design.mjs --clear     # 주입 블록 제거 (하네스 원본 복원)
  *   node .claude/tools/inject-design.mjs --dry-run   # 변경 없이 결과만 출력
  *   node .claude/tools/inject-design.mjs --json      # 결과를 JSON으로 출력
+ *   node .claude/tools/inject-design.mjs --sections # design.md 필수 섹션 완결성만 검사 (미충족 시 exit 1)
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -65,7 +66,13 @@ const TARGETS = [
 // 유틸
 // ─────────────────────────────────────────────────────────────
 const argv = new Set(process.argv.slice(2));
-const MODE = argv.has('--clear') ? 'clear' : argv.has('--check') ? 'check' : 'inject';
+const MODE = argv.has('--clear')
+  ? 'clear'
+  : argv.has('--sections')
+    ? 'sections'
+    : argv.has('--check')
+      ? 'check'
+      : 'inject';
 const DRY_RUN = argv.has('--dry-run');
 const AS_JSON = argv.has('--json');
 
@@ -74,6 +81,131 @@ const rel = (p) => relative(REPO_ROOT, p).split('\\').join('/');
 
 /** CRLF/CR을 LF로 정규화해 지문(fingerprint)이 개행 방식에 흔들리지 않게 한다. */
 const normalizeEol = (text) => text.replace(/\r\n?/g, '\n');
+
+// ─────────────────────────────────────────────────────────────
+// design.md 필수 섹션 완결성 검사 (--sections)
+// ─────────────────────────────────────────────────────────────
+/**
+ * 오케스트레이터가 Phase 0·1에서 확인해야 하는 것은 설계서 "전문"이 아니라
+ * 필수 섹션이 채워졌는지 여부뿐이다. 그 판정을 하네스 단으로 내려
+ * design.md 본문이 오케스트레이터 컨텍스트에 실리지 않게 한다.
+ * 그러므로 이 모드는 어떤 경우에도 design.md 본문을 출력하지 않는다.
+ */
+const REQUIRED_SECTIONS = [
+  { key: 'stack', label: '기술 스택', match: (t) => /(기술|테크)\s*스택|tech(nology)?\s*stack/.test(t) },
+  {
+    key: 'ownership',
+    label: '디렉터리 구조 및 소유권',
+    match: (t) => /(디렉터리|디렉토리|폴더|directory)\s*(구조|structure)/.test(t) || /소유권|ownership/.test(t),
+  },
+  { key: 'commands', label: '표준 명령어', match: (t) => /표준\s*(명령어|커맨드)|standard\s*command/.test(t) },
+  { key: 'contract', label: '계약 산출 형식', match: (t) => /계약.*(형식|포맷|산출)|contract.*(format|output)/.test(t) },
+  {
+    key: 'convention',
+    label: '아키텍처 규약',
+    match: (t) => /아키텍처\s*(규약|규칙|원칙)|architecture\s*(convention|rule|principle)/.test(t),
+  },
+];
+
+/** 본문이 실질적으로 비어 있음을 뜻하는 자리표시자. 이것만 있으면 미충족으로 본다. */
+const PLACEHOLDER = /^(tbd|todo|t\.b\.d\.?|n\/?a|미정|추후\s*작성|작성\s*예정|-+)$/i;
+
+/** 헤딩 텍스트에서 번호·강조·괄호류·이모지를 벗겨 표기 흔들림을 흡수한다. */
+function normalizeHeading(raw) {
+  return raw
+    .replace(/[`*_~]/g, '')
+    .replace(/^[\s#]*(?:\d+(?:[.\-)]\d+)*[.)\-]?|[ivxlcdm]+[.)])\s*/i, '')
+    .replace(/[^\p{L}\p{N}\s/]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * design.md를 헤딩 단위로 훑어 필수 섹션의 존재와 본문 유무를 판정한다.
+ * 본문 구간은 "해당 헤딩부터 같거나 더 상위 레벨의 다음 헤딩까지"로 잡아,
+ * 내용이 하위 섹션에 들어 있는 경우도 충족으로 인정한다.
+ * 코드 펜스 안의 `#` 주석은 헤딩으로 오인하지 않는다.
+ */
+function auditSections(design) {
+  const found = new Map();
+
+  if (design !== null) {
+    const lines = design.split('\n');
+    const headings = [];
+    let inFence = false;
+
+    lines.forEach((line, idx) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence;
+        return;
+      }
+      if (inFence) return;
+      const m = /^(#{1,6})\s+(.*\S)\s*$/.exec(line);
+      if (m) headings.push({ level: m[1].length, text: normalizeHeading(m[2]), start: idx });
+    });
+
+    headings.forEach((h, i) => {
+      const next = headings.slice(i + 1).find((n) => n.level <= h.level);
+      const end = next ? next.start : lines.length;
+      const body = lines
+        .slice(h.start + 1, end)
+        .filter((l) => !/^#{1,6}\s/.test(l))
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !PLACEHOLDER.test(l));
+
+      for (const spec of REQUIRED_SECTIONS) {
+        if (!spec.match(h.text)) continue;
+        const prev = found.get(spec.key);
+        // 같은 섹션이 여러 번 나오면 "본문이 있는 쪽"을 채택한다.
+        if (!prev || (!prev.filled && body.length > 0)) found.set(spec.key, { filled: body.length > 0 });
+      }
+    });
+  }
+
+  return REQUIRED_SECTIONS.map((spec) => {
+    const hit = found.get(spec.key);
+    if (!hit) return { key: spec.key, label: spec.label, ok: false, reason: '섹션 없음' };
+    if (!hit.filled) return { key: spec.key, label: spec.label, ok: false, reason: '본문 비어 있음' };
+    return { key: spec.key, label: spec.label, ok: true, reason: '충족' };
+  });
+}
+
+/** 섹션 검사 결과만 보고한다. 파일을 쓰지 않으며 설계 본문을 출력하지 않는다. */
+function reportSections(design) {
+  const sections = auditSections(design);
+  const fingerprint =
+    design === null ? 'none' : fingerprintOf(design.split(END).join('<!-- DESIGN_SPEC:END(escaped) -->'));
+  const missing = sections.filter((s) => !s.ok);
+  const summary = {
+    mode: MODE,
+    dryRun: DRY_RUN,
+    design: design === null ? null : rel(DESIGN_PATH),
+    fingerprint,
+    designReady: design !== null,
+    sections,
+    results: [],
+    ok: missing.length === 0,
+  };
+
+  if (AS_JSON) {
+    process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
+  } else {
+    console.log('[inject-design] 모드=섹션검사 (읽기 전용)');
+    console.log(
+      `[inject-design] design.md=${design === null ? '없음 (NOT READY)' : rel(DESIGN_PATH)}  fingerprint=${fingerprint}`,
+    );
+    for (const s of sections) console.log(`  ${s.ok ? '✓' : '✗'} ${s.label} — ${s.reason}`);
+    if (missing.length === 0) {
+      console.log('[inject-design] ✓ 필수 섹션이 모두 충족되었다.');
+    } else {
+      console.error(`[inject-design] ✗ 필수 섹션 ${missing.length}개가 미충족이다: ${missing.map((s) => s.label).join(', ')}`);
+      console.error('[inject-design] system-architect에게 보완을 지시하라. design.md 본문을 직접 열어 확인하지 마라.');
+    }
+  }
+
+  if (missing.length > 0) process.exit(1);
+}
 
 /**
  * 본문에서 프론트매터(--- ... ---)의 끝 오프셋을 찾는다.
@@ -188,9 +320,13 @@ function main() {
       if (design.trim() === '') design = null;
     } else {
       // 워크스페이스 경로만 미리 확보해 둔다 (아키텍트가 바로 쓸 수 있도록).
-      mkdirSync(dirname(DESIGN_PATH), { recursive: true });
+      // --sections는 완전 읽기 전용이므로 워크스페이스 경로도 만들지 않는다.
+      if (MODE !== 'sections') mkdirSync(dirname(DESIGN_PATH), { recursive: true });
     }
   }
+
+  // 섹션 검사 모드는 에이전트 파일을 건드리지 않고 여기서 끝난다.
+  if (MODE === 'sections') return reportSections(design);
 
   const block = MODE === 'clear' ? null : buildBlock(design);
   const fingerprint = design === null ? 'none' : fingerprintOf(design.split(END).join('<!-- DESIGN_SPEC:END(escaped) -->'));
