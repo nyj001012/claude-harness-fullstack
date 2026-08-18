@@ -1,7 +1,7 @@
 ---
 name: issue-pm
 description: "오케스트레이터가 확정한 범위 또는 기획서를 바탕으로 마이크로 태스크를 분할하여 GitHub/GitLab에 이슈를 생성하고, 해당 이슈 번호 기반의 작업 브랜치(<타입>/<이슈번호>-<슬러그>)를 자동 생성합니다."
-model: sonnet
+model: haiku
 tools: Bash, Read, Write
 ---
 

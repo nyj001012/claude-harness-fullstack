@@ -83,7 +83,7 @@ node .claude/tools/inject-design.mjs --clear    # 주입 블록 제거, 하네�
 | 에이전트 | 역할 | 모델 |
 |---|---|---|
 | `system-architect` | 기술 스택·구조·규약·소유권 확정, 도메인 경계 설계 | opus |
-| `issue-pm` | 마이크로 태스크 분할, GitHub/GitLab 이슈 생성, 작업 브랜치 파생 | sonnet |
+| `issue-pm` | 마이크로 태스크 분할, GitHub/GitLab 이슈 생성, 작업 브랜치 파생 | haiku |
 | `tech-leader` | FE/BE/QA가 병렬 개발할 수 있는 인터페이스 계약 설계 | sonnet |
 | `frontend-qa` | UI 렌더링·이벤트·폴백에 대한 실패하는(Red) 테스트 선행 작성 | sonnet |
 | `frontend-developer` | 계약과 테스트를 만족하는 UI·클라이언트 상태 구현 | sonnet |
