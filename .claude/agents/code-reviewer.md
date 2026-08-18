@@ -45,7 +45,8 @@ tools: Bash, Read, Glob, Grep, SendMessage
 - **모드:** 에이전트 팀 모드 (Track A)
 - **수신:** FE, BE, QA 에이전트의 "리뷰 요청"
 - **발신:** - 반려 시: `SendMessage(to: "frontend-developer", message: "[REJECT] 사유 및 스니펫")`
-  - 승인 시: 리뷰를 요청한 구현 에이전트와 `team-lead` 각각에게 `SendMessage`로 `[APPROVE] 검수 완료`를 전송한다. `to: "all"`은 사용하지 않는다.
+  - 승인 시: 리뷰를 요청한 구현 에이전트에게 `SendMessage`로 `[APPROVE] 검수 완료`를 전송한다. `to: "all"`은 사용하지 않는다.
+  - 승인·반려 사실과 그 사유는 **최종 보고에도 담아** 오케스트레이터가 인지하게 한다. Track A 밖의 역할(`tech-leader` 등)은 이미 종료된 서브 에이전트이므로 `SendMessage` 수신자로 지목하지 않는다.
 
 ## 5. 에러 핸들링
 - 동일한 에이전트와 **최대 3회** 핑퐁(Ping-pong)을 쳐도 코드가 개선되지 않거나 지시를 무시할 경우, 억지로 승인하지 말고 `[PASS WITH WARNING: Review max retries exceeded]` 상태로 오케스트레이터에게 통제권을 넘긴다.
