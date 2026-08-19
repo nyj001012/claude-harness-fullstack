@@ -51,8 +51,10 @@
 
 ```bash
 node .claude/tools/inject-design.mjs            # 주입/갱신 (멱등)
+node .claude/tools/inject-design.mjs --sections # 필수 5개 섹션 완결성만 검사, 미충족 시 exit 1 (읽기 전용)
 node .claude/tools/inject-design.mjs --check    # 최신성 검증, 드리프트 시 exit 1 (CI용)
 node .claude/tools/inject-design.mjs --json     # fingerprint 및 에이전트별 상태
+node .claude/tools/inject-design.mjs --dry-run  # 파일을 쓰지 않고 결과만 확인
 node .claude/tools/inject-design.mjs --clear    # 주입 블록 제거, 하네스 원본 복원
 ```
 
@@ -74,9 +76,64 @@ node .claude/tools/inject-design.mjs --clear    # 주입 블록 제거, 하네�
 | **4** | 실행 환경에서 사용자 시나리오 통합 검증 | `e2e-tester` |
 | **5** | 원격 Push · PR/MR 생성 · 위키 문서화 | `release-manager`, `tech-writer` |
 
-라우팅은 요청에 따라 필요한 페이즈만 고른다. (전체 구축 / FE 단독 / BE 단독 / 인프라 단독 / 문서 단독)
+라우팅은 요청에 따라 필요한 페이즈만 고른다. (전체 구축 / FE 단독 / BE 단독 / 인프라 단독 / 문서 단독 / 하네스 메타)
 
 각 페이즈 종료 시 오케스트레이터가 마이크로 커밋을 남기고, `.claude/_workspace/log/orchestrator-log.jsonl`에 감사 로그를 append한다.
+
+## 파이프라인의 구조 형태
+
+오케스트레이터를 중심에 둔 **스타(hub-and-spoke) 위상**이며, 페이즈 골격은 선형이다. 서브 에이전트는 스폰 ➔ 작업 ➔ 최종 보고 ➔ 종료하고, 역할 간 전달은 오케스트레이터가 중계한다.
+
+라우트 6개는 **상호 배타적 선택**이다. 동시에 갈라지는 분기가 아니라 필요한 페이즈의 부분집합을 고르는 스위치다. 반면 전체 구축 라우트 안에서는 팬아웃과 팬인이 각각 두 겹으로 나타난다.
+
+```
+Phase 0  라우트 판별 ➔ 설계 주입 ➔ 스택 확보 검사
+   │
+Phase 1  system-architect ──➔ design.md (SSOT)
+   │
+Phase 2  issue-pm (티켓·브랜치)  ·  tech-leader (계약)
+   │        └─ 계약의 완결성이 아래 레인 폭을 결정한다
+   ▼
+Phase 3 ─┬─ Track A (팀 모드 · P2P)
+         │     FE 레인:  frontend-qa ➔ frontend-developer ─┐
+         │     BE 레인:  backend-qa  ➔ backend-developer  ─┤
+         │                                                 ▼
+         │                         code-reviewer   ← 팬인 ① (수렴만 함 · 대기 없음)
+         │                              ↑ 반려 순환 (최대 3회)
+         │
+         └─ Track B (서브 에이전트 · 고립):  devops-engineer
+                     │
+   ┌─────────────────┘  두 트랙은 간선 없이 오케스트레이터의 커밋에서만 합류
+   ▼
+Phase 4  e2e-tester    ← 팬인 ② (동기화 지점 · FE·BE 모두 완료돼야 진입)
+   │
+Phase 5  release-manager  ·  tech-writer
+```
+
+- **팬아웃 ①** — Phase 3의 Track A ∥ Track B. Track B(`devops-engineer`)는 서브 에이전트라 Track A와 간선이 없다. 서로를 모른 채 달리고 오케스트레이터의 마이크로 커밋에서 합류한다.
+- **팬아웃 ②** — Track A 내부의 FE 레인 ∥ BE 레인. **이 병렬을 가능하게 하는 것은 Phase 2의 계약이다.** 서로의 코드를 기다리지 않고 계약만 보고 착수하므로, 계약이 모호하면 레인은 갈라져도 서로를 기다리게 되어 이름만 병렬이 된다.
+- **팬인 ① — 모이기만 하고 기다리지 않는다.** 두 레인이 단일 `code-reviewer`에게 리뷰를 요청하므로 선은 한 점으로 모인다. 그러나 리뷰어는 도착한 레인을 각각 따로 처리한다. FE가 승인을 받는 동안 BE는 두 번째 반려를 받고 되돌아가는 중일 수 있다.
+- **팬인 ② — 모여서 기다린다.** Phase 4는 FE·BE 구현이 **둘 다** 끝나야 진입한다. 한쪽이 남아 있으면 시작하지 않는다. 양쪽 완료를 실제로 요구하는 유일한 지점이다.
+
+### 왜 스타인가
+
+서로 방해하기 쉬운 세 관심사가 "단발성 서브 에이전트 + 오케스트레이터 통합"이라는 하나의 선택으로 동시에 해결된다.
+
+| 관심사 | 스타 구조가 주는 것 |
+|---|---|
+| 권한 경계 강제 | 오케스트레이터가 유일한 통합 지점이므로, 한 역할이 거절당한 일을 다른 역할에게 부탁해 우회하는 경로가 없다 |
+| 컨텍스트 소실 내구성 | 모든 상태가 허브를 통과하므로 페이즈 인계 파일 하나로 재개된다. 피어 그래프에서는 상태가 오가는 메시지 안에 있어 파일로 고정할 수 없다 |
+| 프롬프트 캐시 | 매번 새로 스폰되고 죽는 모델이라 설계 명세를 시스템 프롬프트(불변 접두사)에 주입해 스폰마다 히트시킬 수 있다 |
+
+대가는 중계 비용이다 — 매 전달이 왕복 하나다. 그래서 오가는 빈도가 높은 리뷰 핑퐁 구간만 P2P 예외로 두고, 그 밖은 전부 허브를 통한다.
+
+### 명세와 강제의 구분
+
+위 팬인 구조는 에이전트 정의의 `연결:` 규약과 페이즈 진입 조건으로 **서술**돼 있으며, 이를 검사하는 기계적 게이트는 없다. Phase 4가 양쪽 완료를 기다리는 것도 오케스트레이터가 지키는 규칙이지 자동 차단 장치가 아니다. 현재 자동 검증이 붙어 있는 것은 주입기 계약뿐이다.
+
+```bash
+node --test .claude/tools/inject-design.test.mjs   # 주입기 회귀 테스트 (모드 계약·멱등성·줄바꿈 보존)
+```
 
 ## 에이전트
 
@@ -119,15 +176,25 @@ node .claude/tools/inject-design.mjs --clear    # 주입 블록 제거, 하네�
 
 ```
 .claude/tools/
-└── inject-design.mjs              # design.md ➔ 에이전트 시스템 프롬프트 정적 주입기
+├── inject-design.mjs              # design.md ➔ 에이전트 시스템 프롬프트 정적 주입기
+└── inject-design.test.mjs         # 주입기 회귀 테스트 (node --test)
 
 .claude/_workspace/
-├── 01_architecture/design.md      # 기술 스택·규약·소유권 (SSOT)
-├── 02_issues/issue_report.md      # 생성된 티켓과 작업 브랜치
-├── 03_contracts/                  # 인터페이스 계약 (형식은 design.md가 정함)
-├── 04_infrastructure/             # 설치·배포 스크립트
-└── log/orchestrator-log.jsonl     # 페이즈 감사 로그
+│
+├── (추적) 합의물 — 커밋 대상
+│   ├── 01_architecture/design.md  # 기술 스택·규약·소유권 (SSOT)
+│   ├── 03_contracts/              # 인터페이스 계약 (형식은 design.md가 정함)
+│   └── 04_infrastructure/         # 설치·배포 스크립트
+│
+└── (미추적) 런타임 산출물 — .gitignore 대상
+    ├── 02_issues/issue_report.md  # 티켓 생성 리포트 (실제 SSOT는 GitHub/GitLab의 이슈)
+    ├── handoff/phase-<N>.md       # 페이즈 인계 파일 (Rule 6)
+    └── log/orchestrator-log.jsonl # 페이즈 감사 로그
 ```
+
+미추적 세 경로는 세션마다 새로 생기고 재현 가능한 휘발성 상태다. 스테이징하거나 커밋하지 않는다.
+
+- **페이즈 인계 파일(`handoff/`)** — 오케스트레이터 컨텍스트가 요약되거나 세션이 끊겨도 인계가 끊기지 않게, 페이즈 경계에서 다음 페이즈가 필요한 사실만 40줄 이내로 남긴다. 설계서·계약·소스의 본문을 옮겨 담지 않고 경로만 적는다. 재개 시에는 **가장 높은 번호 하나만** 읽는다.
 
 ## 설계 원칙
 
@@ -137,7 +204,7 @@ node .claude/tools/inject-design.mjs --clear    # 주입 블록 제거, 하네�
 - **객관적 룰북** — 리뷰 기준은 리뷰어의 취향이 아니라 주입된 `<design_spec>`이다. 규약에 없는 지적은 반려가 아닌 "규약 공백" 제안으로 처리한다.
 - **설계는 읽지 않고 주입한다** — 하위 에이전트에게 설계 조회를 시키지 않는다. 하네스가 스폰 전에 전문을 시스템 프롬프트에 보간하여 캐시 가능한 불변 접두사로 만든다.
 - **3회 재시도 후 `[PASS WITH WARNING]`** — 무한 핑퐁을 막되 산출물은 보존하고, 인간 개입이 필요한 지점을 명시적으로 남긴다.
-- **P2P 통신** — 팀원은 리더를 거치지 않고 서로 직접 `SendMessage`로 피드백 루프를 돈다. 브로드캐스트(`to: "all"`)는 쓰지 않는다.
+- **P2P 통신은 Track A 한정** — 팀 모드는 Phase 3 Track A(QA ↔ Developer ↔ Reviewer)에만 쓴다. 그 구간의 팀원은 리더를 거치지 않고 서로 직접 `SendMessage`로 피드백 루프를 돈다. 그 밖의 역할은 모두 서브 에이전트이며 **발신 대상이 없다** — 다른 역할에 전달할 내용은 최종 보고에 담고 오케스트레이터가 중계한다. 브로드캐스트(`to: "all"`)는 쓰지 않는다.
 - **메인 브랜치 보호** — `issue-pm`이 이슈 번호 기반 `<타입>/<이슈번호>-<슬러그>` 브랜치를 먼저 따고, 그 위에서만 개발이 진행된다.
 
 ## 사용법
