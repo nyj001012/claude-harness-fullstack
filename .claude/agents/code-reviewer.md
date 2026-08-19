@@ -44,7 +44,8 @@ tools: Bash, Read, Glob, Grep, SendMessage
 ## 4. 팀 통신 프로토콜
 - **모드:** 에이전트 팀 모드 (Track A)
 - **수신:** FE, BE, QA 에이전트의 "리뷰 요청"
-- **발신:** - 반려 시: `SendMessage(to: "frontend-developer", message: "[REJECT] 사유 및 스니펫")`
+- **발신:**
+  - 반려 시: 리뷰를 요청한 구현 에이전트(`backend-developer` 또는 `frontend-developer`)에게 `SendMessage(to: "<해당 에이전트명>", message: "[REJECT] 사유 및 스니펫")`를 전송한다.
   - 승인 시: 리뷰를 요청한 구현 에이전트에게 `SendMessage`로 `[APPROVE] 검수 완료`를 전송한다. `to: "all"`은 사용하지 않는다.
   - 승인·반려 사실과 그 사유는 **최종 보고에도 담아** 오케스트레이터가 인지하게 한다. Track A 밖의 역할(`tech-leader` 등)은 이미 종료된 서브 에이전트이므로 `SendMessage` 수신자로 지목하지 않는다.
 
