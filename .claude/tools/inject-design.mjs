@@ -281,7 +281,10 @@ function applyToAgent(agentName, block) {
   const path = join(AGENTS_DIR, `${agentName}.md`);
   if (!existsSync(path)) return { agent: agentName, status: 'missing', path: rel(path) };
 
-  const original = normalizeEol(readFileSync(path, 'utf8'));
+  const raw = readFileSync(path, 'utf8');
+  // 파싱은 LF를 전제하므로 정규화하되, 기록 시점에 원본 줄바꿈으로 되돌린다.
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+  const original = normalizeEol(raw);
   const beginIdx = original.indexOf(BEGIN);
   const endIdx = original.indexOf(END);
   const hasBlock = beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx;
@@ -305,7 +308,7 @@ function applyToAgent(agentName, block) {
 
   if (next === original) return { agent: agentName, status: 'unchanged', path: rel(path) };
   if (MODE === 'check') return { agent: agentName, status: 'stale', path: rel(path) };
-  if (!DRY_RUN) writeFileSync(path, next, 'utf8');
+  if (!DRY_RUN) writeFileSync(path, eol === '\n' ? next : next.replace(/\n/g, eol), 'utf8');
   return { agent: agentName, status: MODE === 'clear' ? 'cleared' : hasBlock ? 'updated' : 'injected', path: rel(path) };
 }
 
