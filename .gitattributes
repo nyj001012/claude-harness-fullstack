@@ -1,0 +1,34 @@
+# EOL 정책 — 각 개발자의 `core.autocrlf` 설정에 좌우되지 않게 저장소가 직접 정한다.
+#
+# 왜 필요한가:
+#   `npm pack`은 index가 아니라 **워킹트리**에서 tarball을 만든다. 따라서 저장소를
+#   LF로 정규화하는 것만으로는 부족하다. Windows(`core.autocrlf=true`)에서 publish하면
+#   워킹트리의 CRLF가 그대로 배포되고, `bin/cli.mjs`의 shebang이 `#!/usr/bin/env node\r`가
+#   되어 macOS·Linux에서 `bad interpreter`로 죽는다. 즉 배포 진입점이 Unix에서 작동하지 않는다.
+#
+# 검증 방법:
+#   git ls-files --eol <path>     # i/(index) w/(워킹트리) attr/ 를 한 번에 보여준다
+#   od -c                          # 실제 바이트 확인
+#   ⛔ Git Bash의 `grep -c $'\r$'`는 쓰지 마라. `\r`을 줄바꿈의 일부로 처리해 오판한다.
+
+# 기본: 텍스트로 판정된 파일은 저장소에 LF로 정규화한다.
+* text=auto
+
+# 실행 스크립트 — 워킹트리까지 LF로 고정한다.
+#
+# `eol=lf`는 체크아웃되는 실물의 줄바꿈을 강제하므로 Windows에서도 LF가 된다.
+# 이것이 의도다. shebang을 가진 스크립트가 CRLF면 Unix에서 실행 자체가 불가능하고,
+# 그 상태가 tarball에 실려 배포된다.
+#   - bin/cli.mjs                     : `bin` 필드로 등록되는 배포 진입점
+#   - .claude/tools/inject-design.mjs : 대상 프로젝트로 복사되어 Phase 0에서 실행된다
+*.mjs text eol=lf
+
+# 문서·설정 — 협업 시 EOL 차이만으로 생기는 diff 잡음을 없앤다.
+# 하네스 자산은 대부분 마크다운이고 여러 환경에서 편집되므로 통일해 둔다.
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+LICENSE text eol=lf
