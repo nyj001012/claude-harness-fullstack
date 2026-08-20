@@ -129,11 +129,14 @@ Phase 5  release-manager  ·  tech-writer
 
 ### 명세와 강제의 구분
 
-위 팬인 구조는 에이전트 정의의 `연결:` 규약과 페이즈 진입 조건으로 **서술**돼 있으며, 이를 검사하는 기계적 게이트는 없다. Phase 4가 양쪽 완료를 기다리는 것도 오케스트레이터가 지키는 규칙이지 자동 차단 장치가 아니다. 현재 자동 검증이 붙어 있는 것은 주입기 계약뿐이다.
+위 팬인 구조는 에이전트 정의의 `연결:` 규약과 페이즈 진입 조건으로 **서술**돼 있으며, 이를 검사하는 기계적 게이트는 없다. Phase 4가 양쪽 완료를 기다리는 것도 오케스트레이터가 지키는 규칙이지 자동 차단 장치가 아니다. 자동 검증이 붙어 있는 것은 주입기 계약과 배포 오염 차단, 두 곳뿐이다.
 
 ```bash
 node --test .claude/tools/inject-design.test.mjs   # 주입기 회귀 테스트 (모드 계약·멱등성·줄바꿈 보존)
+node bin/cli.mjs --preflight                      # 배포 오염 검사 (주입 블록·런타임 경로·의존성)
 ```
+
+배포 게이트가 막는 것은 유출이다. 주입 블록이 남은 상태로 publish되면 **이 저장소의 `design.md` 전문이 남의 프로젝트로 실려 간다.** 주입 결과를 커밋하는 지점이 Phase 1에 있으므로 실제로 발생할 수 있고, 그래서 `prepublishOnly`가 `--clear` ➔ `--preflight` ➔ 회귀 테스트를 차례로 통과시킨 뒤에만 publish를 허용한다.
 
 ## 에이전트
 
@@ -175,6 +178,10 @@ node --test .claude/tools/inject-design.test.mjs   # 주입기 회귀 테스트 
 에이전트 간 인수인계는 모두 파일로 이뤄진다.
 
 ```
+(배포 자산 — 대상 프로젝트로 복사되지 않는다)
+├── package.json                   # 하네스 배포용. 의존성 0, prepublishOnly 게이트
+└── bin/cli.mjs                    # npx 스캐폴더 (init / update / --preflight)
+
 .claude/tools/
 ├── inject-design.mjs              # design.md ➔ 에이전트 시스템 프롬프트 정적 주입기
 └── inject-design.test.mjs         # 주입기 회귀 테스트 (node --test)
@@ -207,9 +214,42 @@ node --test .claude/tools/inject-design.test.mjs   # 주입기 회귀 테스트 
 - **P2P 통신은 Track A 한정** — 팀 모드는 Phase 3 Track A(QA ↔ Developer ↔ Reviewer)에만 쓴다. 그 구간의 팀원은 리더를 거치지 않고 서로 직접 `SendMessage`로 피드백 루프를 돈다. 그 밖의 역할은 모두 서브 에이전트이며 **발신 대상이 없다** — 다른 역할에 전달할 내용은 최종 보고에 담고 오케스트레이터가 중계한다. 브로드캐스트(`to: "all"`)는 쓰지 않는다.
 - **메인 브랜치 보호** — `issue-pm`이 이슈 번호 기반 `<타입>/<이슈번호>-<슬러그>` 브랜치를 먼저 따고, 그 위에서만 개발이 진행된다.
 
+## 설치
+
+대상 프로젝트 루트에서 실행한다. 배포 단위는 실행 파일이 아니라 `.claude/` 파일 트리이므로, 설치란 에이전트·스킬·툴 정의를 프로젝트에 놓는 일이다.
+
+```bash
+npx claude-harness-fullstack            # 신규 설치
+npx claude-harness-fullstack update     # 코어만 최신화 (사용자 자산 보존)
+npx claude-harness-fullstack --dry-run  # 쓰지 않고 계획만 확인
+npx claude-harness-fullstack --help     # 전체 옵션
+```
+
+- **기존 프로젝트에 얹는 것이 기본 사용 사례다.** 대상에 이미 있는 파일과 충돌하면 **아무것도 쓰지 않고** 목록을 보여주며 멈춘다. 전부 덮어쓰려면 `--force`.
+- `.gitignore`에 런타임 3경로를 중복 없이 덧붙인다. 기존 내용은 덮어쓰지 않는다.
+- `update`는 코어(`agents/`·`skills/`·`tools/`)만 교체한다. `_workspace/`의 `design.md`·계약과 `.claude/settings*.json`은 손대지 않으며, 대상에만 있는 파일(자체 스킬 등)은 지우지 않고 보고만 한다.
+- ⚠️ `update`는 `agents/`를 교체하므로 주입 블록이 사라진다. 최신화 후 `node .claude/tools/inject-design.mjs`로 재주입한다.
+
+### 전제: Node.js가 필요하다
+
+**이 하네스는 Node.js를 요구한다.** 주입기(`inject-design.mjs`)가 Node 스크립트이고, `run_pipeline`은 Phase 0에서 이것을 실행해 설계 명세를 주입한다. 주입이 실패하면 하위 에이전트 전원이 스택 명세 없이 작업하게 되므로 선택 사항이 아니다.
+
+Claude Code를 **네이티브 인스톨러로 설치한 환경에는 Node가 없을 수 있다.** 그 경우 Node를 별도로 설치해야 한다 (`engines` 하한은 16.7 — `fs.cpSync` 도입 버전).
+
+npm 레지스트리에 접근할 수 없는 환경이라면 수동 복사가 폴백이다.
+
+```bash
+git clone --depth 1 https://github.com/nyj001012/claude-harness-fullstack.git /tmp/harness
+cp -r /tmp/harness/.claude/{agents,skills,tools} <대상>/.claude/
+```
+
+이 경우 `.gitignore` 병합과 충돌 검사는 직접 해야 한다. 「산출물 구조」의 미추적 세 경로를 참고하라.
+
+> 저장소 루트의 `package.json`은 **하네스 배포용**이며 대상 프로젝트의 기술 스택과 무관하다. 의존성은 0개이고, 대상 프로젝트로 복사되지도 않는다. 스택은 여전히 `design.md`만이 정의한다.
+
 ## 사용법
 
-1. 대상 프로젝트 루트에 이 저장소의 `.claude/` 디렉터리를 복사한다. (주입 스크립트 실행에 Node.js가 필요하나, Claude Code 자체가 Node 위에서 동작하므로 추가 의존성은 없다.)
+1. 위 설치를 마친다.
 2. Claude Code에서 하고 싶은 작업을 요청한다. (예: "센서 관제 대시보드를 만들어줘", "로그인 API만 구현해줘")
 3. `run_pipeline`이 요청 성격에 맞는 페이즈만 골라 실행하며, 에이전트 스폰 전에 `inject-design.mjs`를 돌려 설계 명세를 주입한다.
 
