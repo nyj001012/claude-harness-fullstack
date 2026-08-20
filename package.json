@@ -19,6 +19,7 @@
     "url": "git+https://github.com/nyj001012/claude-harness-fullstack.git"
   },
   "author": "nyj001012",
+  "license": "MIT",
   "bin": {
     "claude-harness-fullstack": "bin/cli.mjs"
   },

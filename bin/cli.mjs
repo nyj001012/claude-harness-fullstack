@@ -316,11 +316,24 @@ function preflight() {
   const deps = Object.keys(pkg.dependencies ?? {});
   if (deps.length) problems.push(`dependencies가 비어 있지 않다: ${deps.join(', ')}`);
 
+  /*
+   * 라이선스 선언과 실물이 어긋나지 않았는지 확인한다.
+   *
+   * 한동안 `license` 필드가 비어 있고 LICENSE 파일도 없었다. 그 상태로 publish하면
+   * 저작권이 전부 유보되므로 이용자가 합법적으로 쓸 수 없다. 반대 방향의 어긋남
+   * (파일을 지우고 필드만 남기거나 그 반대)도 같은 결과를 낳으므로, 사람 기억이
+   * 아니라 게이트가 둘의 일치를 지킨다.
+   */
+  if (!pkg.license) problems.push('package.json에 license 필드가 없다.');
+  if (!existsSync(join(PKG_ROOT, 'LICENSE'))) {
+    problems.push('루트에 LICENSE 파일이 없다. license 필드만 선언해도 라이선스 고지가 되지 않는다.');
+  }
+
   if (problems.length) {
     for (const p of problems) console.error(`[harness] \u2717 ${p}`);
     process.exit(1);
   }
-  log('\u2713 preflight 통과 \u2014 주입 블록 0건, 런타임 경로 0건, 의존성 0건');
+  log('\u2713 preflight 통과 \u2014 주입 블록 0건, 런타임 경로 0건, 의존성 0건, 라이선스 선언·실물 일치');
 }
 
 // ─────────────────────────────────────────────────────────────
