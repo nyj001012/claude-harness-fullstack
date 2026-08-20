@@ -1,0 +1,39 @@
+{
+  "name": "claude-harness-fullstack",
+  "version": "0.1.0",
+  "description": "Claude Code 애자일 SDLC 하네스 — 12개 에이전트 페르소나와 13개 스킬, 기술 스택 무관",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "harness",
+    "agents",
+    "skills",
+    "sdlc",
+    "tdd",
+    "scaffolding"
+  ],
+  "homepage": "https://github.com/nyj001012/claude-harness-fullstack#readme",
+  "bugs": "https://github.com/nyj001012/claude-harness-fullstack/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nyj001012/claude-harness-fullstack.git"
+  },
+  "author": "nyj001012",
+  "bin": {
+    "claude-harness-fullstack": "bin/cli.mjs"
+  },
+  "files": [
+    ".claude/agents/**",
+    ".claude/skills/**",
+    ".claude/tools/**",
+    "bin/**"
+  ],
+  "engines": {
+    "node": ">=16.7.0"
+  },
+  "scripts": {
+    "test": "node --test .claude/tools/inject-design.test.mjs",
+    "preflight": "node bin/cli.mjs --preflight",
+    "prepublishOnly": "node .claude/tools/inject-design.mjs --clear && node bin/cli.mjs --preflight && npm test"
+  }
+}
