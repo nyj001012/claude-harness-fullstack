@@ -53,6 +53,7 @@ const TARGETS = [
   'backend-developer',
   'backend-qa',
   'code-reviewer',
+  'db-engineer',
   'devops-engineer',
   'e2e-tester',
   'frontend-developer',
