@@ -329,11 +329,36 @@ function preflight() {
     problems.push('루트에 LICENSE 파일이 없다. license 필드만 선언해도 라이선스 고지가 되지 않는다.');
   }
 
+  /*
+   * 실행 스크립트의 shebang이 CRLF로 끝나지 않았는지 확인한다.
+   *
+   * `npm pack`은 index가 아니라 워킹트리에서 tarball을 만든다. 그래서 저장소를
+   * LF로 정규화하는 것만으로는 부족하다. Windows에서 publish하면 워킹트리의 CRLF가
+   * 그대로 배포되고, `#!/usr/bin/env node\r`가 된 shebang은 macOS·Linux에서
+   * `bad interpreter`로 죽는다. 즉 배포 진입점이 Unix에서 실행되지 않는다.
+   *
+   * `.gitattributes`가 1차 방어선이지만, 에디터가 CRLF로 저장하거나 파일이 다른
+   * 경로로 들어오면 다시 깨진다. publish를 막는 이 게이트가 최종 방어선이다.
+   */
+  const scripts = [join('bin', 'cli.mjs'), join('.claude', 'tools', 'inject-design.mjs')];
+  for (const relPath of scripts) {
+    const full = join(PKG_ROOT, relPath);
+    if (!existsSync(full)) continue;
+    const firstLine = readFileSync(full, 'utf8').split('\n')[0];
+    if (!firstLine.startsWith('#!')) continue;
+    if (firstLine.endsWith('\r')) {
+      problems.push(
+        `${toPosix(relPath)}의 shebang이 CRLF로 끝난다. Unix에서 실행되지 않는다.\n` +
+        '           → `.gitattributes`의 `*.mjs text eol=lf`를 확인하고 `git add --renormalize .` 후 재체크아웃하라.',
+      );
+    }
+  }
+
   if (problems.length) {
     for (const p of problems) console.error(`[harness] \u2717 ${p}`);
     process.exit(1);
   }
-  log('\u2713 preflight 통과 \u2014 주입 블록 0건, 런타임 경로 0건, 의존성 0건, 라이선스 선언·실물 일치');
+  log('\u2713 preflight 통과 \u2014 주입 블록 0건, 런타임 경로 0건, 의존성 0건, 라이선스 일치, shebang LF');
 }
 
 // ─────────────────────────────────────────────────────────────

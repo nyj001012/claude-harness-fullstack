@@ -136,7 +136,15 @@ node --test .claude/tools/inject-design.test.mjs   # 주입기 회귀 테스트 
 node bin/cli.mjs --preflight                      # 배포 오염 검사 (주입 블록·런타임 경로·의존성)
 ```
 
-배포 게이트가 막는 것은 유출이다. 주입 블록이 남은 상태로 publish되면 **이 저장소의 `design.md` 전문이 남의 프로젝트로 실려 간다.** 주입 결과를 커밋하는 지점이 Phase 1에 있으므로 실제로 발생할 수 있고, 그래서 `prepublishOnly`가 `--clear` ➔ `--preflight` ➔ 회귀 테스트를 차례로 통과시킨 뒤에만 publish를 허용한다.
+배포 게이트가 막는 것은 셋이다.
+
+| 검사 | 막는 사고 |
+|---|---|
+| 주입 블록 잔존 | **이 저장소의 `design.md` 전문이 남의 프로젝트로 실려 간다.** 주입 결과를 커밋하는 지점이 Phase 1에 있으므로 실제로 발생할 수 있다 |
+| 라이선스 선언·실물 불일치 | 라이선스 고지 없이 배포되면 이용자가 합법적으로 쓸 수 없다 |
+| shebang EOL | `npm pack`은 index가 아니라 **워킹트리**에서 tarball을 만든다. Windows에서 publish하면 CRLF가 배포되고 `#!/usr/bin/env node\r`가 되어 **Unix에서 `npx`가 실행되지 않는다** |
+
+`prepublishOnly`가 `--clear` ➔ `--preflight` ➔ 회귀 테스트를 차례로 통과시킨 뒤에만 publish를 허용한다. EOL은 `.gitattributes`가 1차 방어선이고, 이 게이트가 최종 방어선이다.
 
 ## 에이전트
 
@@ -179,6 +187,7 @@ node bin/cli.mjs --preflight                      # 배포 오염 검사 (주입
 
 ```
 (배포 자산 — 대상 프로젝트로 복사되지 않는다)
+├── .gitattributes                 # EOL 고정. *.mjs는 eol=lf (shebang이 CRLF면 Unix 실행 불가)
 ├── package.json                   # 하네스 배포용. 의존성 0, prepublishOnly 게이트
 └── bin/cli.mjs                    # npx 스캐폴더 (init / update / --preflight)
 
