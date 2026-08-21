@@ -4,6 +4,7 @@ description: "기획서와 이슈를 바탕으로 프론트엔드(UI/State), 백
 allowed-tools:
   - Read
   - Write
+  - Edit
   - Bash
   - SendMessage
 ---

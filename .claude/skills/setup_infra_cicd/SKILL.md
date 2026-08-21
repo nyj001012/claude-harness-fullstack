@@ -4,6 +4,7 @@ description: "아키텍처가 제시한 배포 제약에 맞춰 실행 환경 �
 allowed-tools:
   - Read
   - Write
+  - Edit
   - Bash
   - SendMessage
 ---
