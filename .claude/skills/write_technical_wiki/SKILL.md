@@ -4,6 +4,7 @@ description: "승인된 아키텍처 기획서, 인터페이스 계약, 그리�
 allowed-tools:
   - Read
   - Write
+  - Edit
   - Bash
 ---
 

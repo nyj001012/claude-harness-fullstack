@@ -4,6 +4,7 @@ description: 프론트엔드와 백엔드 구현이 완료된 후, 아키텍처�
 allowed-tools:
   - Read
   - Write
+  - Edit
   - Bash
   - SendMessage
 ---

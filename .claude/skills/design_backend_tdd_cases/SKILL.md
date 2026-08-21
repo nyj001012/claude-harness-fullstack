@@ -4,6 +4,7 @@ description: "인터페이스 계약을 바탕으로 서버 API와 비즈니스 
 allowed-tools:
   - Read
   - Write
+  - Edit
   - Bash
   - SendMessage
 ---

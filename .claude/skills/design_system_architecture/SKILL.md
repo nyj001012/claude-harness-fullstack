@@ -4,6 +4,7 @@ description: "사용자의 요구사항을 분석하여 기술 스택을 선정�
 allowed-tools:
   - Read
   - Write
+  - Edit
   - Bash
   - SendMessage
 ---
