@@ -256,11 +256,13 @@ node bin/cli.mjs --preflight                      # 배포 오염 검사 (주입
 대상 프로젝트 루트에서 실행한다. 배포 단위는 실행 파일이 아니라 `.claude/` 파일 트리이므로, 설치란 에이전트·스킬·툴 정의를 프로젝트에 놓는 일이다.
 
 ```bash
-npx claude-harness-fullstack            # 신규 설치
-npx claude-harness-fullstack update     # 코어만 최신화 (사용자 자산 보존)
-npx claude-harness-fullstack --dry-run  # 쓰지 않고 계획만 확인
-npx claude-harness-fullstack --help     # 전체 옵션
+npx github:nyj001012/claude-harness-fullstack            # 신규 설치
+npx github:nyj001012/claude-harness-fullstack update     # 코어만 최신화 (사용자 자산 보존)
+npx github:nyj001012/claude-harness-fullstack --dry-run  # 쓰지 않고 계획만 확인
+npx github:nyj001012/claude-harness-fullstack --help     # 전체 옵션
 ```
+
+> 아직 npm 레지스트리에 게시되지 않았다. `npx claude-harness-fullstack`처럼 패키지명만 주면 레지스트리를 조회해 404로 실패하므로, `github:` 스펙을 붙여 저장소에서 직접 받는다. 이 방식은 로컬에 `git`이 필요하다.
 
 - **기존 프로젝트에 얹는 것이 기본 사용 사례다.** 대상에 이미 있는 파일과 충돌하면 **아무것도 쓰지 않고** 목록을 보여주며 멈춘다. 전부 덮어쓰려면 `--force`.
 - `.gitignore`에 런타임 3경로를 중복 없이 덧붙인다. 기존 내용은 덮어쓰지 않는다.
@@ -275,7 +277,7 @@ Claude Code를 **네이티브 인스톨러로 설치한 환경에는 Node가 없
 
 `run_pipeline`은 **Phase 0에서 런타임을 선행 검사하고, Node가 없으면 그 자리에서 멈춘다.** 라우트 판별 직후·주입 이전에 확인하므로, 주입 실패를 "`design.md`가 불완전하다"로 오진해 명세 없이 개발에 들어가는 경로가 차단된다. 하네스 자체를 손보는 하네스 메타 라우트도 예외가 아니다 — 주입은 생략하지만 회귀 테스트와 배포 오염 검사가 Node를 쓴다.
 
-npm 레지스트리에 접근할 수 없는 환경이라면 수동 복사가 폴백이다.
+`npx`로 받을 수 없는 환경이라면 수동 복사가 폴백이다.
 
 ```bash
 git clone --depth 1 https://github.com/nyj001012/claude-harness-fullstack.git /tmp/harness

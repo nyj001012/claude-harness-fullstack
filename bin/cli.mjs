@@ -20,11 +20,12 @@
  *   있는 기존 프로젝트에 얹는 **병합**이다. 복사 도중 실패하면 반쯤 덮어쓴
  *   상태가 남으므로, 한 건이라도 충돌하면 아무것도 쓰지 않고 멈춘다.
  *
- * 사용법:
- *   npx claude-harness-fullstack              # init (기본) — 신규 설치
- *   npx claude-harness-fullstack update       # 코어만 최신화, 사용자 자산 보존
- *   npx claude-harness-fullstack --dry-run    # 쓰지 않고 계획만 출력
- *   node bin/cli.mjs --preflight              # 배포 전 오염 검사 (publish 게이트)
+ * 사용법 (npm 미게시 상태이므로 `github:` 스펙으로 저장소에서 직접 받는다.
+ * 패키지명만 주면 레지스트리를 조회해 404로 실패한다):
+ *   npx github:nyj001012/claude-harness-fullstack            # init (기본) — 신규 설치
+ *   npx github:nyj001012/claude-harness-fullstack update     # 코어만 최신화, 사용자 자산 보존
+ *   npx github:nyj001012/claude-harness-fullstack --dry-run  # 쓰지 않고 계획만 출력
+ *   node bin/cli.mjs --preflight                             # 배포 전 오염 검사 (publish 게이트)
  */
 
 import {
@@ -231,7 +232,7 @@ function init() {
  */
 function update() {
   if (!isInstalled()) {
-    fail(`대상에 하네스가 없다: ${TARGET_ROOT}\n           \u2192 먼저 \`npx claude-harness-fullstack\` 로 설치하라.`);
+    fail(`대상에 하네스가 없다: ${TARGET_ROOT}\n           \u2192 먼저 \`npx github:nyj001012/claude-harness-fullstack\` 로 설치하라.`);
   }
 
   const sources = readSources();
@@ -367,7 +368,9 @@ function preflight() {
 const HELP = `
 claude-harness-fullstack \u2014 Claude Code 애자일 SDLC 하네스 스캐폴더
 
-  npx claude-harness-fullstack [명령] [옵션]
+  npx github:nyj001012/claude-harness-fullstack [명령] [옵션]
+
+  npm 레지스트리에 미게시 상태다. 패키지명만 주면 404로 실패하므로 \`github:\` 스펙을 쓴다.
 
 명령:
   init       신규 설치 (기본). 대상에 같은 파일이 있으면 아무것도 쓰지 않고 멈춘다
