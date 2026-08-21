@@ -35,6 +35,7 @@ const TARGETS = [
   'backend-developer',
   'backend-qa',
   'code-reviewer',
+  'db-engineer',
   'devops-engineer',
   'e2e-tester',
   'frontend-developer',
@@ -278,7 +279,7 @@ test('--check는 파일을 쓰지 않는다', (t) => {
   assert.equal(fx.snapshot(), before);
 });
 
-test('--json은 fingerprint·designReady·대상 10개 상태를 반환한다', (t) => {
+test('--json은 fingerprint·designReady·대상 11개 상태를 반환한다', (t) => {
   const r = runJson(fixture(t), ['--dry-run']);
   assert.equal(r.status, 0);
   assert.equal(r.data.designReady, true);

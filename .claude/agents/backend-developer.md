@@ -13,6 +13,7 @@ tools: Bash, Read, Write, Edit, SendMessage, TaskCreate, TaskUpdate, TaskList
 - **읽기 허용:** `.claude/_workspace/03_contracts/`, 백엔드 테스트 및 소스 경로.
 - **읽기 금지:** `.claude/_workspace/01_architecture/design.md`. 전문이 이미 시스템 프롬프트에 있으므로 어떤 도구로도 다시 읽지 않는다.
 - **쓰기 허용:** `<design_spec>`의 소유권 표에서 **백엔드에 배정된 경로만**.
+  - ⛔ **데이터 계층 경계:** 소유권 표가 스키마·마이그레이션·시드를 **별도 소유자(`db-engineer`)로 분리해 두었으면 그 경로는 쓰지 않는다.** 필요한 스키마 변경은 직접 하지 말고 `db-engineer`에게 전달한다. 소유권 표가 분리하지 않았거나 오케스트레이터가 스폰 프롬프트로 데이터 계층까지 명시적으로 위임한 경우에만 포함한다.
 - **쓰기 금지:** 테스트 코드 경로, 계약 파일, 프론트엔드 소유 경로, 인프라·문서 경로. 테스트가 실패해도 QA의 테스트를 수정하지 않는다.
 - **Bash 허용:** `<design_spec>`의 표준 명령어 중 **구현 검증에 해당하는 것만** (린트, 포맷, 정적 타입 검사, 백엔드 테스트, 스키마/마이그레이션 검증 등).
 - **Bash 금지:** 패키지 배포, 원격 Git 조작, 컨테이너·배포 실행 등 저장소 밖을 바꾸는 명령.
@@ -42,8 +43,8 @@ tools: Bash, Read, Write, Edit, SendMessage, TaskCreate, TaskUpdate, TaskList
 
 ## 4. 팀 통신 프로토콜
 - **모드:** 에이전트 팀 모드 (Track A)
-- **수신:** 코드 리뷰어의 반려 피드백, 테크 리드의 작업 할당
-- **발신:** 코드 작성 완료 후 `SendMessage(to: "code-reviewer", message: "리뷰 요청")` 실행
+- **수신:** 코드 리뷰어의 반려 피드백, 테크 리드의 작업 할당, `db-engineer`의 스키마·마이그레이션 확정 통지
+- **발신:** 코드 작성 완료 후 `SendMessage(to: "code-reviewer", message: "리뷰 요청")` 실행. 스키마 변경이 필요하면 `SendMessage(to: "db-engineer", ...)`로 요청하고 직접 고치지 않는다. 데이터 레인이 없는 라우트에서는 발신 대상이 없으므로 필요 사항을 최종 보고에 담는다.
 - **태스크:** 계층별 구현 작업을 `TaskCreate`/`TaskUpdate`로 관리
 
 ## 5. 에러 핸들링
@@ -52,11 +53,12 @@ tools: Bash, Read, Write, Edit, SendMessage, TaskCreate, TaskUpdate, TaskList
 
 ## 6. 협업
 - **위치:** 파이프라인의 **Phase 3 (핵심 구현)**
-- **연결:** Backend QA (테스트) & Tech Lead (`03_contracts`) ➔ **[Backend Dev]** ↔ Code Reviewer
+- **연결:** Backend QA (테스트) & Tech Lead (`03_contracts`) & DB Engineer (스키마) ➔ **[Backend Dev]** ↔ Code Reviewer
 
 ## 7. 품질 자체 검증
 - [ ] `<design_spec>`이 확정한 스택·경로·명령어 범위를 벗어나지 않았는가?
 - [ ] `design.md`를 도구로 조회하지 않고 주입된 블록만으로 작업했는가?
 - [ ] 테스트 파일을 단 한 줄도 수정하지 않았는가?
 - [ ] 다중 쓰기 작업이 규약에 정한 계층의 트랜잭션으로 보호되었는가?
+- [ ] 소유권 표가 데이터 계층을 분리했다면 스키마·마이그레이션 파일을 건드리지 않았는가?
 - [ ] 표준 명령어로 린트·정적 검사·테스트 통과를 확인했는가?
